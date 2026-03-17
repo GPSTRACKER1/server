@@ -14,18 +14,28 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Deploy a EC2 Instance ${{ matrix.instance }}
         env:
           HOST: ${{ secrets[format('EC2_HOST_{0}', matrix.instance)] }}
           USER: ${{ secrets[format('EC2_USER_{0}', matrix.instance)] }}
           KEY:  ${{ secrets[format('EC2_SSH_KEY_{0}', matrix.instance)] }}
+          REPO: ${{ github.server_url }}/${{ github.repository }}
         run: |
           echo "$KEY" > deploy_key
           chmod 600 deploy_key
 
-          ssh -o StrictHostKeyChecking=no -i deploy_key ${USER}@${HOST} "cd ~/gps-tracker && git pull && npm install && pm2 restart gps-tracker"
+          ssh -o StrictHostKeyChecking=no -i deploy_key ${USER}@${HOST} "
+            if [ ! -d ~/gps-tracker ]; then
+              git clone ${REPO} ~/gps-tracker
+            else
+              cd ~/gps-tracker && git pull
+            fi
+            cd ~/gps-tracker
+            npm install
+            pm2 restart gps-tracker 2>/dev/null || pm2 start server.js --name gps-tracker
+          "
 
           rm -f deploy_key
           echo "✅ Instancia ${{ matrix.instance }} actualizada"
