@@ -6,11 +6,18 @@ EMAIL=$2
 
 echo "🔐 Configurando HTTPS para ${DOMAIN}..."
 
-# ── Instalar Nginx y Certbot si no están ─────────────────────────────────────
+# ── Instalar Nginx si no está ─────────────────────────────────────────────────
 if ! command -v nginx &> /dev/null; then
-  echo "📦 Instalando Nginx y Certbot..."
+  echo "📦 Instalando Nginx..."
   sudo apt update -qq
-  sudo apt install -y nginx certbot python3-certbot-nginx
+  sudo apt install -y nginx
+fi
+
+# ── Instalar Certbot si no está ───────────────────────────────────────────────
+if ! command -v certbot &> /dev/null; then
+  echo "📦 Instalando Certbot..."
+  sudo apt update -qq
+  sudo apt install -y certbot python3-certbot-nginx
 fi
 
 # ── Escribir config de Nginx ──────────────────────────────────────────────────
