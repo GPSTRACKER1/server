@@ -18,15 +18,19 @@ jobs:
 
       - name: Deploy a EC2 Instance ${{ matrix.instance }}
         env:
-          HOST: ${{ secrets[format('EC2_HOST_{0}', matrix.instance)] }}
-          USER: ${{ secrets[format('EC2_USER_{0}', matrix.instance)] }}
-          KEY:  ${{ secrets[format('EC2_SSH_KEY_{0}', matrix.instance)] }}
-          REPO: ${{ github.server_url }}/${{ github.repository }}
+          HOST:   ${{ secrets[format('EC2_HOST_{0}', matrix.instance)] }}
+          USER:   ${{ secrets[format('EC2_USER_{0}', matrix.instance)] }}
+          KEY:    ${{ secrets[format('EC2_SSH_KEY_{0}', matrix.instance)] }}
+          DOMAIN: ${{ secrets[format('DOMAIN_{0}', matrix.instance)] }}
+          REPO:   ${{ github.server_url }}/${{ github.repository }}
         run: |
           echo "$KEY" > deploy_key
           chmod 600 deploy_key
 
-          ssh -o StrictHostKeyChecking=no -i deploy_key ${USER}@${HOST} "
+          ssh -o StrictHostKeyChecking=no -i deploy_key ${USER}@${HOST} << REMOTE
+            set -e
+
+            # ── 1. Actualizar código ──────────────────────────────────────
             if [ ! -d ~/gps-tracker ]; then
               git clone ${REPO} ~/gps-tracker
             else
@@ -35,7 +39,42 @@ jobs:
             cd ~/gps-tracker
             npm install
             pm2 restart gps-tracker 2>/dev/null || pm2 start server.js --name gps-tracker
-          "
+
+            # ── 2. Instalar Nginx y Certbot si no están ───────────────────
+            if ! command -v nginx &> /dev/null; then
+              sudo apt update -qq
+              sudo apt install -y nginx certbot python3-certbot-nginx
+            fi
+
+            # ── 3. Configurar Nginx como proxy ────────────────────────────
+            sudo tee /etc/nginx/sites-available/gps-tracker > /dev/null << 'NGINX'
+            server {
+                listen 80;
+                server_name ${DOMAIN};
+
+                location / {
+                    proxy_pass http://localhost:8080;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade \$http_upgrade;
+                    proxy_set_header Connection "upgrade";
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                }
+            }
+            NGINX
+
+            sudo ln -sf /etc/nginx/sites-available/gps-tracker /etc/nginx/sites-enabled/
+            sudo rm -f /etc/nginx/sites-enabled/default
+            sudo nginx -t && sudo systemctl reload nginx
+
+            # ── 4. Generar certificado SSL (solo si no existe aún) ────────
+            if [ ! -d "/etc/letsencrypt/live/${DOMAIN}" ]; then
+              sudo certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos -m admin@${DOMAIN}
+            else
+              echo "✅ Certificado SSL ya existe para ${DOMAIN}, omitiendo..."
+            fi
+
+          REMOTE
 
           rm -f deploy_key
-          echo "✅ Instancia ${{ matrix.instance }} actualizada"
+          echo "✅ Instancia ${{ matrix.instance }} desplegada en https://${DOMAIN}"
